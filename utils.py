@@ -123,8 +123,15 @@ def get_external_knowledge(args, corpus):
        (hasattr(args, "cnnsoftmax") and args.cnnsoftmax):
         # extract sufrface forms
         from allennlp.modules.elmo import batch_to_ids
-        all_words =  corpus.dictionary.idx2word
+        if args.langs is not None:
+            multilingual = True
+        else:
+            multilingual = False
+        all_words = corpus.dictionary.idx2word
         all_words.append('') # empty pad token
+        if multilingual:
+            all_langs = corpus.dictionary.idx2lang
+            all_langs.append(None)
         char_arr, char_vocab = batch_to_ids([all_words]), None
         char_arr = char_arr[:,:,:args.max_charlen]
         max_dlen = args.max_deflen
@@ -136,14 +143,23 @@ def get_external_knowledge(args, corpus):
             rel_lens, def_lens = [], []
             count, rels, defs = 0, 0, 0
             print ("Loading external info...")
-            for word in all_words:
-                synset = wordnet.synsets(word)
+            for idx,word in enumerate(all_words):
+                if multilingual:
+                    lang = all_langs[idx]
+                    synsets = wordnet.synsets(word, lang=lang)
+                else:
+                    synsets = wordnet.synsets(word)
                 cur_def = [len(all_words)-1 for i in range(max_dlen)]
                 cur_rel = [len(all_words)-1 for i in range(max_rlen)]
-                if len(synset) > 0:
-                    synonyms = [l.name() for s in synset for l in s.lemmas() if l.name() in corpus.dictionary.word2idx]
-                    synonyms = [corpus.dictionary.word2idx[w] for w in np.unique(synonyms)]
-                    top_def = [corpus.dictionary.word2idx[w] for w in synset[0].definition().split() if w in corpus.dictionary.word2idx]
+                if len(synsets) > 0:
+                    if multilingual:
+                        synonyms = [(l.name(),l.lang()) for s in synsets for lang in corpus.langs for l in s.lemmas(lang=lang) if (l.name(),l.lang()) in corpus.dictionary.word2idx]
+                        synonyms = [corpus.dictionary.word2idx[k] for k in np.unique(synonyms)]
+                        top_def = [corpus.dictionary.word2idx[(w,'eng')] for w in synsets[0].definition().split() if (w,'eng') in corpus.dictionary.word2idx]
+                    else:
+                        synonyms = [l.name() for s in synsets for l in s.lemmas() if l.name() in corpus.dictionary.word2idx]
+                        synonyms = [corpus.dictionary.word2idx[w] for w in np.unique(synonyms)]
+                        top_def = [corpus.dictionary.word2idx[w] for w in synsets[0].definition().split() if w in corpus.dictionary.word2idx]
                     cur_rel = synonyms
                     cur_def = top_def
                     if len(synonyms) > 0:

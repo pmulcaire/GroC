@@ -165,6 +165,9 @@ parser.add_argument('--finetune', action="store_true",
 parser.add_argument('--finetune_save', default=None,
                     help="save fine-tuned model and logs to this directory (not the original")
 
+parser.add_argument('--langs', default=None,
+                    help="list of languages used, comma-separated (e.g. eng or eng,spa,fra)")
+
 
 args = parser.parse_args()
 args.tied = True
@@ -240,14 +243,18 @@ def model_load(fn):
     return model, criterion, optimizer
 
 def corpus_load(corpus_path, use_unk=False):
-    fn = 'corpus.{}.data'.format(hashlib.md5(corpus_path.strip('/').encode()).hexdigest())
+    langs = '-'.join(args.langs.split(','))
+    fn = 'corpus.{}.data'.format(hashlib.md5((corpus_path.strip('/')+langs).encode()).hexdigest())
     print (fn)
     if os.path.exists(fn):
-        logging('Loading cached dataset from {}...'.format(corpus_path))
+        logging('Loading cached {} dataset from {}...'.format(langs, corpus_path))
         corpus = torch.load(fn)
     else:
-        logging('Producing dataset from {} ...'.format(corpus_path))
-        corpus = data.Corpus(args.data, use_unk=use_unk)
+        logging('Producing {} dataset from {} ...'.format(langs, corpus_path))
+        if args.langs is not None:
+            corpus = data.MultilingualCorpus(args.data, args.langs, use_unk=use_unk)
+        else:
+            corpus = data.Corpus(args.data, use_unk=use_unk)
         torch.save(corpus, fn)
     return corpus
 
