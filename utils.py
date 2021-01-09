@@ -72,12 +72,18 @@ def consecutive_groups(data, stepsize=1):
     return np.split(data, np.where(np.diff(data) != stepsize)[0]+1)
 
 
-def load_criterion(args, ntokens, logging):
+def load_criterion(args, logging, mode='lm'):
     """
 	Function to load different criteria depending on the vocabulary splits and size.
     """
-    logging("Using no splits; vocab size {}".format(ntokens))
-    criterion = torch.nn.CrossEntropyLoss()
+    if mode == "lm":
+        logging("Using no splits; vocab size {}".format(args.ntoken))
+        criterion = torch.nn.CrossEntropyLoss()
+    elif mode == "retrofit":
+        logging("Vocab size {}; dictionary coverage {}".format(args.nttoken, args.ntdict))
+        criterion = torch.nn.CosineEmbeddingLoss()
+    else:
+        raise ValueError("Unrecognized criterion type {}".format(mode))
     return criterion
 
 

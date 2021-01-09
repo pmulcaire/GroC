@@ -284,7 +284,7 @@ if args.resume:
     model.dropouti, model.dropouth, model.dropout, args.dropoute = args.dropouti, args.dropouth, args.dropout, args.dropoute
 else:
     model = model.RNNModel( args, char_arr=char_arr, rel_arr=rel_arr, def_arr=def_arr, dict=corpus.dictionary)
-    criterion = load_criterion(args, ntokens, logging)
+    criterion = load_criterion(args, logging)
 
 
 if args.cuda:
