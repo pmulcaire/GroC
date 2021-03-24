@@ -40,10 +40,30 @@ def batchify(data, bsz, args):
     return data
 
 
+def batchify_retrofit(data, bsz, args):
+    # Work out how cleanly we can divide the dataset into bsz parts.
+    nbatch = data.size(0) // bsz
+    # Trim off any extra elements that wouldn't cleanly fit (remainders).
+    data = data.narrow(0, 0, nbatch * bsz)
+    # Evenly divide the data across the bsz batches.
+    data = data.view(-1,bsz,2).contiguous()
+    # n batches, each batch has bsz instances, each instance has 2 indices
+
+    if args.cuda:
+        data = data.cuda()
+    return data
+
+
 def get_batch(source, i, args, seq_len=None, evaluation=False):
     seq_len = min(seq_len if seq_len else args.bptt, len(source) - 1 - i)
     data = source[i:i+seq_len]
     target = source[i+1:i+1+seq_len].view(-1)
+    return data, target
+
+
+def get_retrofit_batch(source, i, evaluation=False):
+    data = source[i,:,0]
+    target = source[i,:,1]
     return data, target
 
 
@@ -80,7 +100,7 @@ def load_criterion(args, logging, mode='lm'):
         logging("Using no splits; vocab size {}".format(args.ntoken))
         criterion = torch.nn.CrossEntropyLoss()
     elif mode == "retrofit":
-        logging("Vocab size {}; dictionary coverage {}".format(args.nttoken, args.ntdict))
+        logging("Vocab size {}; dictionary coverage {}".format(args.nttokens, args.ntdict))
         criterion = torch.nn.CosineEmbeddingLoss()
     else:
         raise ValueError("Unrecognized criterion type {}".format(mode))
@@ -118,7 +138,7 @@ def store_word_ce(args, data_source, model, corpus, criterion, fname='out'):
     pickle.dump(vocab, open(fname+'.pkl','wb'))
 
 
-def get_external_knowledge(args, corpus):
+def get_external_knowledge(args, corpus_dictionary, corpus_langs=None):
     """
         Function to extract surface, relational, and definitional
         features from an external knowledge base.
@@ -133,11 +153,11 @@ def get_external_knowledge(args, corpus):
             multilingual = True
         else:
             multilingual = False
-        all_words = corpus.dictionary.idx2word
+        all_words = corpus_dictionary.idx2word
         all_words.append('') # empty pad token
         if multilingual:
-            all_langs = corpus.dictionary.idx2lang
-            all_langs.append(None)
+            all_langs = corpus_dictionary.idx2lang
+            all_langs.append(None) # for English, I think?
         char_arr, char_vocab = batch_to_ids([all_words]), None
         char_arr = char_arr[:,:,:args.max_charlen]
         max_dlen = args.max_deflen
@@ -159,13 +179,13 @@ def get_external_knowledge(args, corpus):
                 cur_rel = [len(all_words)-1 for i in range(max_rlen)]
                 if len(synsets) > 0:
                     if multilingual:
-                        synonyms = [(l.name(),l.lang()) for s in synsets for lang in corpus.langs for l in s.lemmas(lang=lang) if (l.name(),l.lang()) in corpus.dictionary.word2idx]
-                        synonyms = [corpus.dictionary.word2idx[k] for k in np.unique(synonyms)]
-                        top_def = [corpus.dictionary.word2idx[(w,'eng')] for w in synsets[0].definition().split() if (w,'eng') in corpus.dictionary.word2idx]
+                        synonyms = [(l.name(),l.lang()) for s in synsets for lang in all_langs for l in s.lemmas(lang=lang) if (l.name(),l.lang()) in corpus_dictionary.word2idx]
+                        synonyms = [corpus_dictionary.word2idx[k] for k in np.unique(synonyms)]
+                        top_def = [corpus_dictionary.word2idx[(w,'eng')] for w in synsets[0].definition().split() if (w,'eng') in corpus_dictionary.word2idx]
                     else:
-                        synonyms = [l.name() for s in synsets for l in s.lemmas() if l.name() in corpus.dictionary.word2idx]
-                        synonyms = [corpus.dictionary.word2idx[w] for w in np.unique(synonyms)]
-                        top_def = [corpus.dictionary.word2idx[w] for w in synsets[0].definition().split() if w in corpus.dictionary.word2idx]
+                        synonyms = [l.name() for s in synsets for l in s.lemmas() if l.name() in corpus_dictionary.word2idx]
+                        synonyms = [corpus_dictionary.word2idx[w] for w in np.unique(synonyms)]
+                        top_def = [corpus_dictionary.word2idx[w] for w in synsets[0].definition().split() if w in corpus_dictionary.word2idx]
                     cur_rel = synonyms
                     cur_def = top_def
                     if len(synonyms) > 0:

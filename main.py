@@ -261,7 +261,7 @@ def corpus_load(corpus_path, use_unk=False):
 
 corpus = corpus_load(args.data)
 
-eval_batch_size = 30
+eval_batch_size = 2
 test_batch_size = 2
 train_data = batchify(corpus.train, args.batch_size, args)
 val_data = batchify(corpus.valid, eval_batch_size, args)
@@ -270,7 +270,7 @@ ntokens = len(corpus.dictionary)
 args.ntoken = ntokens
 
 if not args.finetune:
-    char_arr, rel_arr, def_arr = get_external_knowledge(args, corpus)
+    char_arr, rel_arr, def_arr = get_external_knowledge(args, corpus.dictionary)
 
 ###############################################################################
 # Build the model
@@ -299,7 +299,7 @@ logging('Model vocab size: %d ' % len(model.dict.word2idx))
 logging(model)
 
 if args.finetune:
-    char_arr, rel_arr, def_arr = get_external_knowledge(model.H, corpus)
+    char_arr, rel_arr, def_arr = get_external_knowledge(model.H, corpus.dictionary)
     model.change_embedding_vocab(char_arr, rel_arr, def_arr, corpus.dictionary)
     params = list(model.parameters()) + list(criterion.parameters())
     total_params = sum(x.size()[0] * x.size()[1] if len(x.size()) > 1 else x.size()[0] for x in params if x.size() and x.requires_grad)
@@ -319,10 +319,14 @@ def evaluate(data_source, batch_size=10):
     hidden = model.init_hidden(batch_size)
     for i in range(0, data_source.size(0) - 1, args.bptt):
         data, targets = get_batch(data_source, i, args, evaluation=True)
-        output, weight, bias, hidden = model(data, hidden)
+        hidden = repackage_hidden(hidden)
+        try:
+            output, weight, bias, hidden = model(data, hidden)
+        except RuntimeError as exc:
+            print(exc) # OOM hits here
+            ipy.embed()
         logits = torch.mm(output,weight.t()) + bias
         total_loss += len(data) * criterion(logits, targets).data
-        hidden = repackage_hidden(hidden)
     return total_loss.item() / len(data_source)
 
 
@@ -351,7 +355,6 @@ def train():
         optimizer.zero_grad()
 
         output, weight, bias, hidden, rnn_hs, dropped_rnn_hs = model(data, hidden, return_h=True)
-
 
         logits = torch.mm(output,weight.t()) + bias
         raw_loss = criterion(logits, targets)

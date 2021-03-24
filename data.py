@@ -231,3 +231,91 @@ class MultilingualCorpus(object):
                         raise ValueError(f"Unknown word: {word}")
                     token += 1
         return ids
+
+
+class AlignmentCorpus(object):
+    def __init__(self, dict_path, tgt_lang='eng', src_lang='fra', use_unk=False):
+        self.use_unk = use_unk
+        self.target_dictionary = Dictionary()
+        self.source_dictionary = Dictionary()
+        self.dictionary = MultilingualDictionary()
+        self.src_lang = src_lang
+        self.tgt_lang = tgt_lang
+        print("Indexing words for {}-{}...".format(src_lang,tgt_lang))
+        train_path = os.path.join(dict_path,"{}-{}.train.dict".format(src_lang,tgt_lang))
+        valid_path = os.path.join(dict_path,"{}-{}.valid.dict".format(src_lang,tgt_lang))
+        test_path = os.path.join(dict_path,"{}-{}.test.dict".format(src_lang,tgt_lang))
+        for path in [train_path, valid_path, test_path]:
+            self.store_pairs(path)
+        print("{} target words".format(len(self.target_dictionary)))
+        print("{} source words".format(len(self.source_dictionary)))
+        print("{} total words".format(len(self.dictionary)))
+        if self.use_unk:
+            print("Adding UNK token...")
+            self.dictionary.set_unk()
+        else:
+            self.dictionary.unk = None
+
+        print("Sorting vocab by frequency...")
+        self.target_dictionary = self.order_by_freq(self.target_dictionary)
+        self.source_dictionary = self.order_by_freq(self.source_dictionary)
+
+        self.train, self.valid, self.test = [],[],[]
+        self.train = self.read_pair_ids(train_path)
+        self.valid = self.read_pair_ids(valid_path)
+        self.test = self.read_pair_ids(test_path)
+
+    def store_pairs(self, path):
+        """Stores word pairs from a dictionary"""
+        assert os.path.exists(path), "expected path {} does not exist".format(path)
+        lang_pair_name = self.src_lang + '-' + self.tgt_lang
+        assert lang_pair_name in path, "{} not in path {}".format(lang_pair_name,
+                                                                  os.path.basename(path))
+        # Add words to the dictionary
+        with open(path, 'r') as f:
+            for line in f:
+                w1, w2 = line.split()
+                self.source_dictionary.add_word(w1)
+                self.target_dictionary.add_word(w2)
+                self.dictionary.add_word(w1, self.src_lang)
+                self.dictionary.add_word(w2, self.tgt_lang)
+
+
+    def order_by_freq(self, dictionary):
+        """Ordering vocab by frequency."""
+        dd = dictionary.counter
+        ord_ids = sorted(dd, key=dd.get)[::-1]
+        ord_hash, new_counter = {}, {}
+        for j, cur_id in enumerate(ord_ids):
+            ord_hash[cur_id] = j
+        for key in dictionary.word2idx.keys():
+            #word, lang = key
+            word = key
+            cur_id = dictionary.word2idx[key]
+            dictionary.word2idx[key] = ord_hash[cur_id]
+            dictionary.idx2word[ord_hash[cur_id]] = word
+            # self.dictionary.idx2lang[ord_hash[cur_id]] = lang
+            replaced_count = dd[cur_id]
+            new_counter[cur_id] = dd[ord_ids[cur_id]]
+        dictionary.counter = new_counter
+        return dictionary
+
+    def read_pair_ids(self, path):
+        """Tokenizes a parallel dictionary."""
+        assert os.path.exists(path)
+        # Add words to the dictionary
+        print("starting tokenization")
+        with open(path, 'r') as f:
+            pairs = 0
+            for line in f:
+                pairs += 1
+        # Tokenize file content
+        with open(path, 'r') as f:
+            ids = torch.LongTensor(pairs,2)
+            pair = 0
+            for line in f:
+                w1, w2 = line.split()
+                ids[pair,0] = self.source_dictionary.word2idx[w1]
+                ids[pair,1] = self.target_dictionary.word2idx[w2]
+                pair += 1
+        return ids
