@@ -1,17 +1,7 @@
 #    This code builds on the AWD-LSTM codebase
 #    (https://github.com/salesforce/awd-lstm-lm).
 #
-#    groc is free software: you can redistribute it and/or modify
-#    it under the terms of the GNU General Public License version 3 as
-#    published by the Free Software Foundation.
-#
-#    groc is distributed in the hope that it will be useful,
-#    but WITHOUT ANY WARRANTY; without even the implied warranty of
-#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-#    GNU General Public License for more details.
-#
-#    You should have received a copy of the GNU General Public License
-#    along with groc. If not, see http://www.gnu.org/licenses/
+#    <copyright and licensing removed for anonymization>
 
 import torch
 import torch.nn as nn
@@ -21,6 +11,7 @@ import numpy as np
 from allennlp.modules.highway import Highway
 from adaptive_io import AdaptiveEmbedding
 from utils import *
+from screening import ScreeningSoftmax
 
 import IPython as ipy
 
@@ -37,7 +28,23 @@ class RNNModel(nn.Module):
         self.define_rnn(H)
         self.define_joint(H)
         self.define_bias(H)
+        self.define_screening(H)
         self.init_weights()
+
+    def define_screening(self, H):
+        """
+            Define the screening model for faster training.
+        """
+        if H.screen:
+            if not hasattr(self, "_decoder"):
+                self._screening_lookup = nn.Linear(self.H.emsize, self.H.ntoken)
+            else:
+                self._screening_lookup = self._decoder
+            self._screening_model = ScreeningSoftmax(k=H.screen_clusters,
+                                                  samples=H.screen_samples,
+                                                  freq=H.screen_freq,
+                                                  thresh=H.screen_thresh,
+                                                  ninp=H.emsize)
 
     def define_joint(self,H):
         """
@@ -380,8 +387,7 @@ class RNNModel(nn.Module):
 
     def batch_combined_enc(self, l=None, r=None, new=None):
         """
-            Compute the compositional representations for the selected vocabulary items in a batch-like mode. For efficiency the updates are made in a sparse way with probability p that is controlled by
-            the char_update_ratio argument.
+            Compute the compositional representations for the selected vocabulary items in a batch-like mode. For efficiency the updates are made in a sparse way with probability p that is controlled by the char_update_ratio argument.
         """
         # Get the indexes correspond to the left and right offsets
         num = r - l
@@ -636,23 +642,21 @@ class RNNModel(nn.Module):
 
         return weight
 
-    def embed_inputs(self, input, weight=None):
+    def embed_inputs(self, input, weight=None, reshape=True):
         """
             Embed inputs using the given output embedding or based on the
             corresponding input embedding of each method.
         """
-        emb = None
-        if emb is None:
-            if self.H.adaptiveoutputs or self.H.cnnsoftmax:
-                emb = self._lookup(input).view(input.shape[0], input.shape[1], self.H.emsize)
-            elif self.H.adaptiveoutputs_tied or self.H.char_emb:
-                emb = weight[input.view(-1)].view(input.shape[0], input.shape[1], self.H.emsize)
-            else:
-                emb = self._lookup(input).view(input.shape[0], input.shape[1], self.H.emsize)
-        emb = self._lockdrop(emb, self.H.dropouti if self.use_dropout else 0)
+        if self.H.char_emb:
+            emb = self.combined_enc(input)
+        else:
+            emb = self._lookup(input)
+        if reshape:
+            emb = emb.view(input.shape[0], input.shape[1], self.H.emsize)
+            emb = self._lockdrop(emb, self.H.dropouti if self.use_dropout else 0)
         return emb
 
-    def output_bias(self, weight):
+    def output_bias(self, weight=None):
         """
             Return the output bias for the full vocabulary.
         """
@@ -667,7 +671,7 @@ class RNNModel(nn.Module):
                 bias = self._decoder.weight
         return bias.view(-1)
 
-    def forward(self, input, hidden, return_h=False, eval_mode=False):
+    def forward(self, input, hidden, return_h=False, eval_mode=False, gold=None, current_batch=-1):
         """
             This function makes a forward pass of the input tensor and returns the components for computing the logits as well as optionally the hidden states of the rnn.
         """
@@ -678,11 +682,14 @@ class RNNModel(nn.Module):
                 self.cached_weight = weight
             else:
                 weight = self.cached_weight
+            bias = self.output_bias(weight=weight)
         else:
-            weight = self.output_embedding(0, self.H.ntoken)
+            #weight = self.output_embedding(0, self.H.ntoken)
+            # remove this from here
+            pass
 
         # Embed input tensor
-        emb = self.embed_inputs(input, weight=weight)
+        emb = self.embed_inputs(input, weight=None)
 
         # Encode the prefixes of the input tensor
         raw_output, raw_outputs, outputs, hidden = self.rnn_pass(emb, hidden)
@@ -690,12 +697,21 @@ class RNNModel(nn.Module):
         result = output.view(output.size(0)*output.size(1), output.size(2))
         outputs.append(output)
 
+        # Load weights and biases
+        if not eval_mode:
+            if self.H.screen:
+                weight = self._screening_model(output, self._screening_lookup.weight, gold, current_batch=current_batch)
+                bias = self.output_bias(weight=None)
+                bias = self._screening_model.filter(bias)
+            else:
+                weight = self.output_embedding(0, self.H.ntoken)
+                bias = self.output_bias(weight=weight)
+
         # Apply output transformation
         if self.H.joint_emb is not None:
             weight = self.batch_apply_output_network(weight)
 
-        # Load bias
-        bias = self.output_bias(weight=weight)
+
 
         if return_h:
             return result, weight, bias, hidden, raw_outputs, outputs

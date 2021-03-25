@@ -167,7 +167,16 @@ parser.add_argument('--finetune_save', default=None,
 
 parser.add_argument('--langs', default=None,
                     help="list of languages used, comma-separated (e.g. eng or eng,spa,fra)")
-
+parser.add_argument('--screen', action="store_true",
+                    help='whether to use a screening model or not')
+parser.add_argument('--screen_clusters', type=int, default=200,
+                    help='number of clusters for the screening model')
+parser.add_argument('--screen_freq', type=int, default=1,
+                    help='assign memberships for the clusters of the screening model every k batches')
+parser.add_argument('--screen_samples', type=int, default=None,
+                    help='number of elements to sample at each cluster membership assignment step')
+parser.add_argument('--screen_thresh', type=float, default=0.1,
+                    help='membership probability threshold of the screening model')
 
 args = parser.parse_args()
 args.tied = True
@@ -320,13 +329,9 @@ def evaluate(data_source, batch_size=10):
     for i in range(0, data_source.size(0) - 1, args.bptt):
         data, targets = get_batch(data_source, i, args, evaluation=True)
         hidden = repackage_hidden(hidden)
-        try:
-            output, weight, bias, hidden = model(data, hidden)
-        except RuntimeError as exc:
-            print(exc) # OOM hits here
-            ipy.embed()
+        output, weight, bias, hidden = model(data, hidden)
         logits = torch.mm(output,weight.t()) + bias
-        total_loss += len(data) * criterion(logits, targets).data
+        total_loss += len(data) * criterion(logits, targets).item()
     return total_loss.item() / len(data_source)
 
 
@@ -354,10 +359,12 @@ def train():
         hidden = repackage_hidden(hidden)
         optimizer.zero_grad()
 
-        output, weight, bias, hidden, rnn_hs, dropped_rnn_hs = model(data, hidden, return_h=True)
-
+        output, weight, bias, hidden, rnn_hs, dropped_rnn_hs = model(data, hidden, return_h=True,  gold=targets if args.screen else None, )
         logits = torch.mm(output,weight.t()) + bias
-        raw_loss = criterion(logits, targets)
+        if args.screen:
+            raw_loss = criterion(logits, model._screening_model.targets_reindexed)
+        else:
+            raw_loss = criterion(logits, targets)
 
         loss = raw_loss
         # Activation Regularization
