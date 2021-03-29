@@ -182,10 +182,11 @@ class ScreeningSoftmax(nn.Module):
                 selected_ids = self.sampled_targets
                 inter = set(selected_ids) & set(targets.tolist())
                 missing = list(set(targets.tolist()) - inter)
-                additional_members, _ = self.cluster_weights(weight[missing], targets, full=True)
-                self.cluster_members = torch.cat([self.cluster_members, additional_members], dim=1)
-                selected_ids = selected_ids + missing
-                self.sampled_targets = selected_ids
+                if len(missing) > 0:
+                    additional_members, _ = self.cluster_weights(weight[missing], targets, full=True)
+                    self.cluster_members = torch.cat([self.cluster_members, additional_members], dim=1)
+                    selected_ids = selected_ids + missing
+                    self.sampled_targets = selected_ids
         # multiply the cluster masks with the top members per cluster to get the predictions.
         self.predictions = torch.mm(cluster_masks.sum(dim=0).view(1,-1), self.cluster_members[:, :]).squeeze()
 
