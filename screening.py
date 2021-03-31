@@ -184,7 +184,6 @@ class ScreeningSoftmax(nn.Module):
                 selected_ids = self.sampled_targets
                 inter = set(selected_ids) & set(targets.tolist())
                 missing = list(set(targets.tolist()) - inter)
-                new_ids = selected_ids + missing
                 if len(missing) > 0:
                     additional_members, _ = self.cluster_weights(weight[missing], targets, full=True)
                     self.cluster_members = torch.cat([self.cluster_members, additional_members], dim=1)
