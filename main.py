@@ -323,7 +323,7 @@ if args.finetune:
 def evaluate(data_source, batch_size=10):
     # Turn on evaluation mode which disables dropout.
     model.eval()
-    total_loss = torch.Tensor([0])
+    total_loss = 0.
     ntokens = len(corpus.dictionary)
     hidden = model.init_hidden(batch_size)
     for i in range(0, data_source.size(0) - 1, args.bptt):
@@ -334,7 +334,7 @@ def evaluate(data_source, batch_size=10):
         logits = torch.mm(output,weight.t()) + bias
         total_loss += len(data) * criterion(logits, targets).item()
     print("")
-    return total_loss.item() / len(data_source)
+    return total_loss / len(data_source)
 
 
 def train():
@@ -361,7 +361,7 @@ def train():
         hidden = repackage_hidden(hidden)
         optimizer.zero_grad()
 
-        output, weight, bias, hidden, rnn_hs, dropped_rnn_hs = model(data, hidden, return_h=True,  gold=targets if args.screen else None, )
+        output, weight, bias, hidden, rnn_hs, dropped_rnn_hs = model(data, hidden, return_h=True,  gold=targets if args.screen else None, current_batch=i)
         logits = torch.mm(output,weight.t()) + bias
         if args.screen:
             raw_loss = criterion(logits, model._screening_model.targets_reindexed)
@@ -393,7 +393,6 @@ def train():
         ###
         batch += 1
         i += seq_len
-
 # Loop over epochs.
 lr = args.lr
 best_val_loss = []

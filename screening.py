@@ -106,7 +106,6 @@ class ScreeningSoftmax(nn.Module):
         """
         # sample from the full vocabulary for efficiency
         random_ids = np.unique(targets.tolist() + np.random.randint(weight.shape[0], size=self.samples).tolist()).tolist()
-        soft_probs = self.gumbel_softmax(self.cluster(weight[random_ids]).t(), tau=1, hard=False)
         self.sampled_targets = random_ids
         selected_weights = weight[random_ids,:]
         return selected_weights, random_ids
@@ -163,7 +162,7 @@ class ScreeningSoftmax(nn.Module):
         Returns:
             <Tensor>, contains the filtered weights based on the screening model.
         """
-        self.current_batch = current_batch if "current_batch" not in dir(self) else self.current_batch
+        self.current_batch = current_batch 
         self.targets_reindexed = None
 
         # cluster the context first to get the target cluster mask.
@@ -179,14 +178,19 @@ class ScreeningSoftmax(nn.Module):
         else:
             self.cluster_members = self.cluster_members.detach()
             if self.samples is not None:
+                # This option does not work well with a small number
+                # of samples and frequency because it will keep adding
+                # members if they are not already in the cache. 
                 selected_ids = self.sampled_targets
                 inter = set(selected_ids) & set(targets.tolist())
                 missing = list(set(targets.tolist()) - inter)
+                new_ids = selected_ids + missing
                 if len(missing) > 0:
                     additional_members, _ = self.cluster_weights(weight[missing], targets, full=True)
                     self.cluster_members = torch.cat([self.cluster_members, additional_members], dim=1)
                     selected_ids = selected_ids + missing
                     self.sampled_targets = selected_ids
+        
         # multiply the cluster masks with the top members per cluster to get the predictions.
         self.predictions = torch.mm(cluster_masks.sum(dim=0).view(1,-1), self.cluster_members[:, :]).squeeze()
 

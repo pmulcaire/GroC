@@ -684,9 +684,11 @@ class RNNModel(nn.Module):
                 weight = self.cached_weight
             bias = self.output_bias(weight=weight)
         else:
-            #weight = self.output_embedding(0, self.H.ntoken)
-            # remove this from here
-            pass
+            if hasattr(self, "cached_weight"):
+                if hasattr(self, "_combined_cached"):
+                    del (self._combined_cached)
+                del (self.cached_weight)
+                torch.cuda.empty_cache()
 
         # Embed input tensor
         emb = self.embed_inputs(input, weight=None)
@@ -700,7 +702,10 @@ class RNNModel(nn.Module):
         # Load weights and biases
         if not eval_mode:
             if self.H.screen:
-                weight = self._screening_model(output, self._screening_lookup.weight, gold, current_batch=current_batch)
+                self._screening_model(output, self._screening_lookup.weight, gold, current_batch=current_batch)
+                # Get the output embedding only for the selected words from the screening model
+                selected_targets = torch.tensor([self._screening_model.nonzero_targets]).cuda()
+                weight = self.embed_inputs(selected_targets, weight=None).view(-1, self.H.emsize)
                 bias = self.output_bias(weight=None)
                 bias = self._screening_model.filter(bias)
             else:
